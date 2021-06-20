@@ -2,6 +2,9 @@
 # A weather tracking and processing application split into multiple microservices
 """ services include:
     Data service for database (todo),
+    Generator app that can generate random weather regions,
+        make this app an asynchronous worker node that can be
+        started through a work queue (todo)
     Registering service that takes data from real world data points,
         ex: weather channel or a large json file of "experimental data"
         This large json file can help us learn how to gzip and send large data files between
