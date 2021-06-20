@@ -1,7 +1,7 @@
 from sqlalchemy.orm import declarative_base, Session
 from sqlalchemy import create_engine, Column, Integer, String, Float, select, delete
 
-_DATABASE_PATH = "sqlite:///data.db"
+_DATABASE_PATH = "sqlite:///../data/data.db"
 
 Base = declarative_base()
 engine = create_engine(_DATABASE_PATH)

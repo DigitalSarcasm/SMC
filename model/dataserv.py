@@ -3,8 +3,11 @@ from flask import Flask, Blueprint, jsonify, request
 from model.database import initialize_db, get_all_regions, Region, add_region_obj, delete_all_regions
 import json
 import gzip
+import pika
 
 _DATASERV_PORT = 8100
+_GENERATOR_QUEUE = "map_generator"
+
 
 # we will outline all the /api/data procedures here
 
@@ -16,6 +19,8 @@ def data_serv_home():
     page = ""
     page += "<a href=" + request.url + "get_regions>All regions\n"
     page += "<a href=" + request.url + "clear_regions>clear regions\n"
+    page += "<a href=" + request.url + "generate>generate regions\n"
+
 
 
     return page
@@ -41,6 +46,26 @@ def clear_regions():
     delete_all_regions()
     ret = {"code":"success"}
     return jsonify(ret)
+
+@data_service.route("/generate")
+def generate_regions():
+    # Create connection
+    conn = pika.BlockingConnection(pika.ConnectionParameters(host="localhost"))
+    chan = conn.channel()
+
+    # declare the queue
+    chan.queue_declare(_GENERATOR_QUEUE)
+
+    # Load our options for the generator into json
+    generator_opts = {"long_max": 50, "lat_max": 50, "gen_type": "random"}
+    generator_opts = json.dumps(generator_opts)
+
+    # send generator options to rabbitmq
+    chan.basic_publish("", _GENERATOR_QUEUE, generator_opts)
+
+    conn.close()
+
+    return "Success"
 
 @data_service.route("/import_regions", methods=["POST"])
 def import_regions():

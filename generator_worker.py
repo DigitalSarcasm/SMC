@@ -2,14 +2,18 @@
 from enum import Enum
 from random import randint, random
 from model.database import Region
-from json import dumps
+import json
 import requests
 import gzip
+import pathlib
+import pika
 
 _NUMBER_OF_POINTS = 225
 _SIZE_LIMIT_MIN = 50
 _SIZE_LIMIT_MAX = 400
 
+_DIR_PATH = "data/"
+_GENERATOR_QUEUE = "map_generator"
 
 class GeneratorMode(Enum):
     ordered = 0
@@ -88,25 +92,67 @@ def generate_ordered(long_max, lat_max):
     data["area"] = area
     return data
 
+def get_generator_type(type):
+    if type == "random":
+        return GeneratorMode.random
+    elif type == "ordered":
+        return GeneratorMode.ordered
 
-if __name__ == "__main__":
+def on_request(ch, method, props, body):
+    # Get the dimensions as well as the generator mode from the body
+    generator_args = json.loads(body)
+    long_max = generator_args["long_max"]
+    lat_max = generator_args["lat_max"]
+    gen_type = get_generator_type(generator_args["gen_type"])
+
     # Generate map data with randomized method
-    map_data = dumps(generate_area(50, 50, GeneratorMode.random))
+    map_data = json.dumps(generate_area(long_max, lat_max, gen_type))
     # Compress the data before saving and sending it out
     comp_data = gzip.compress(bytes(map_data, "utf-8"))
-
+    print("Generated map:")
     print(f"Original size: {len(map_data)}.\tNew size {len(comp_data)}")
 
+    # Don't save to file anymore as this worker can be on any random network
+    # If the directory doesn't exist, create the path. if it does, it is simply ignored
+    # pathlib.Path(_DIR_PATH).mkdir(parents=True, exist_ok=True)
     # Write to file
-    with open("data/map.data", "w") as f:
-        f.write(str(comp_data))
+    # with open(_DIR_PATH + "map.data", "w") as f:
+    #     f.write(str(comp_data))
 
     # Then send to data service
     try:
         resp = requests.post("http://127.0.0.1:8100/import_regions", data=comp_data)
         # Print Response from service
+        print("Sent Map data to data services")
         print(resp.text)
     except requests.exceptions.ConnectionError:
         print(f"Failure: Connection error to data service")
 
+    # Make sure to ack the message to the message queue before exiting
+    ch.basic_ack(delivery_tag=method.delivery_tag)
 
+if __name__ == "__main__":
+    # Create connection to rabbitmq
+    conn = pika.BlockingConnection(
+       pika.ConnectionParameters(host="localhost"))
+    #Get channel
+    chan = conn.channel()
+
+    # no need to declare exhange due to using the default one
+    # chan.exchange_declare(exchange="map_generator", exchange_type="")
+
+    # Declare queue
+    chan.queue_declare(_GENERATOR_QUEUE)
+
+    # setup consuming callback
+    chan.basic_consume("map_generator", on_request)
+
+    # Start loop that waits for generator requests
+    try:
+        print("Starting worker, waiting for requests")
+        chan.start_consuming()
+    except KeyboardInterrupt:
+        print("Shutting down worker")
+
+    # Make sure to close connection when shutting down
+    conn.close()
